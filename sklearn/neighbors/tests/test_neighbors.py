@@ -9,6 +9,7 @@ import pytest
 from sklearn import metrics
 from sklearn import neighbors, datasets
 from sklearn.exceptions import DataConversionWarning
+from sklearn.exceptions import NotFittedError
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
@@ -26,6 +27,8 @@ from sklearn.utils.testing import assert_warns
 from sklearn.utils.testing import assert_warns_message
 from sklearn.utils.testing import ignore_warnings
 from sklearn.utils.validation import check_random_state
+
+from sklearn.externals.joblib import parallel_backend
 
 rng = np.random.RandomState(0)
 # load and shuffle iris dataset
@@ -124,6 +127,13 @@ def test_n_neighbors_datatype():
                         neighbors_.kneighbors, X=X, n_neighbors=-3)
     assert_raises_regex(TypeError, expected_msg,
                         neighbors_.kneighbors, X=X, n_neighbors=3.)
+
+
+def test_not_fitted_error_gets_raised():
+    X = [[1]]
+    neighbors_ = neighbors.NearestNeighbors()
+    assert_raises(NotFittedError, neighbors_.kneighbors_graph, X)
+    assert_raises(NotFittedError, neighbors_.radius_neighbors_graph, X)
 
 
 def test_precomputed(random_state=42):
@@ -364,9 +374,6 @@ def test_radius_neighbors_classifier_when_no_neighbors():
                                    clf.predict(z1))
                 if outlier_label is None:
                     assert_raises(ValueError, clf.predict, z2)
-                elif False:
-                    assert_array_equal(np.array([1, outlier_label]),
-                                       clf.predict(z2))
 
 
 def test_radius_neighbors_classifier_outlier_labeling():
@@ -1314,6 +1321,25 @@ def test_same_radius_neighbors_parallel(algorithm):
         assert_array_almost_equal(dist[i], dist_parallel[i])
         assert_array_equal(ind[i], ind_parallel[i])
     assert_array_almost_equal(graph, graph_parallel)
+
+
+@pytest.mark.parametrize('backend', ['loky', 'multiprocessing', 'threading'])
+@pytest.mark.parametrize('algorithm', ALGORITHMS)
+def test_knn_forcing_backend(backend, algorithm):
+    # Non-regression test which ensure the knn methods are properly working
+    # even when forcing the global joblib backend.
+    with parallel_backend(backend):
+        X, y = datasets.make_classification(n_samples=30, n_features=5,
+                                            n_redundant=0, random_state=0)
+        X_train, X_test, y_train, y_test = train_test_split(X, y)
+
+        clf = neighbors.KNeighborsClassifier(n_neighbors=3,
+                                             algorithm=algorithm,
+                                             n_jobs=3)
+        clf.fit(X_train, y_train)
+        clf.predict(X_test)
+        clf.kneighbors(X_test)
+        clf.kneighbors_graph(X_test, mode='distance').toarray()
 
 
 def test_dtype_convert():
